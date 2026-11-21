@@ -31,6 +31,14 @@ pub fn parse_line(line: &str) -> Option<(u32, Traffic)> {
     ))
 }
 pub fn nethogs_path() -> Option<&'static str> {
+    if crate::process::is_flatpak() {
+        if Path::new("/run/host/root/usr/bin/nethogs").is_file() {
+            return Some("/usr/bin/nethogs");
+        }
+        if Path::new("/run/host/root/usr/sbin/nethogs").is_file() {
+            return Some("/usr/sbin/nethogs");
+        }
+    }
     ["/usr/sbin/nethogs", "/usr/bin/nethogs"]
         .into_iter()
         .find(|p| Path::new(p).is_file())
@@ -41,6 +49,20 @@ pub fn nethogs_has_caps() -> bool {
         Some(p) => p,
         None => return false,
     };
+    if crate::process::is_flatpak() {
+        if let Ok(output) = Command::new("flatpak-spawn")
+            .args(["--host", "getcap", path])
+            .output()
+        {
+            if output.status.success() {
+                let text = String::from_utf8_lossy(&output.stdout);
+                if text.contains("cap_net_raw") || text.contains("cap_net_admin") {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
     for bin in ["/usr/bin/getcap", "/usr/sbin/getcap", "getcap"] {
         if let Ok(output) = Command::new(bin).arg(path).output() {
             if output.status.success() {
@@ -90,8 +112,17 @@ pub fn start(state: Arc<Mutex<Network>>) -> io::Result<Capture> {
         )
     })?;
 
+    let in_flatpak = crate::process::is_flatpak();
     let use_caps = nethogs_has_caps();
-    let mut child = if use_caps {
+    let mut child = if in_flatpak {
+        Command::new("flatpak-spawn")
+            .args(["--host", n_path, "-t", "-d", "1", "-v", "0"])
+            .env("LC_ALL", "C")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?
+    } else if use_caps {
         Command::new(n_path)
             .args(["-t", "-d", "1", "-v", "0"])
             .env("LC_ALL", "C")
