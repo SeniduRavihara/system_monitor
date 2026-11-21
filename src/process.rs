@@ -2,8 +2,21 @@ use std::{
     collections::HashMap,
     fs, io,
     os::fd::{AsRawFd, FromRawFd, OwnedFd},
+    path::Path,
     time::Instant,
 };
+
+pub fn is_flatpak() -> bool {
+    Path::new("/.flatpak-info").exists()
+}
+
+pub fn proc_dir() -> &'static str {
+    if is_flatpak() && Path::new("/run/host/root/proc").is_dir() {
+        "/run/host/root/proc"
+    } else {
+        "/proc"
+    }
+}
 #[derive(Clone, Debug, Default)]
 pub struct Process {
     pub pid: u32,
@@ -83,7 +96,8 @@ pub fn parse_stat(text: &str) -> Option<(String, u32, u64, u64, u64)> {
     ))
 }
 pub fn read_process(pid: u32) -> Option<Process> {
-    let base = format!("/proc/{pid}");
+    let p_dir = proc_dir();
+    let base = format!("{p_dir}/{pid}");
     let (name, parent, start, ticks, rss) =
         parse_stat(&fs::read_to_string(format!("{base}/stat")).ok()?)?;
     let status = fs::read_to_string(format!("{base}/status")).ok()?;
@@ -94,12 +108,20 @@ pub fn read_process(pid: u32) -> Option<Process> {
             .parse()
             .ok()
     })?;
-    let command = fs::read(format!("{base}/cmdline"))
+    let command: String = fs::read(format!("{base}/cmdline"))
         .map(|b| String::from_utf8_lossy(&b).replace('\0', " ").trim().into())
         .unwrap_or_default();
     let exe = fs::read_link(format!("{base}/exe"))
         .map(|p| p.display().to_string())
-        .unwrap_or_else(|_| "Unavailable".into());
+        .unwrap_or_else(|_| {
+            // When running in Flatpak sandbox, host symlinks under /proc/*/exe may be unreadable.
+            // Fallback to the first token of the command line.
+            command
+                .split_whitespace()
+                .next()
+                .unwrap_or("Unavailable")
+                .to_string()
+        });
     let io = fs::read_to_string(format!("{base}/io")).ok().and_then(|s| {
         let get = |key: &str| {
             s.lines()
@@ -327,7 +349,8 @@ impl Sampler {
             .max(0.001);
         let hz = unsafe { libc::sysconf(libc::_SC_CLK_TCK) } as f64;
         let mut next = HashMap::new();
-        if let Ok(entries) = fs::read_dir("/proc") {
+        let p_dir = proc_dir();
+        if let Ok(entries) = fs::read_dir(p_dir) {
             for e in entries.flatten() {
                 let Some(pid) = e.file_name().to_str().and_then(|s| s.parse().ok()) else {
                     continue;
@@ -346,7 +369,7 @@ impl Sampler {
             }
         }
         let mut out = Snapshot::default();
-        if let Ok(s) = fs::read_to_string("/proc/net/dev") {
+        if let Ok(s) = fs::read_to_string(format!("{p_dir}/net/dev")) {
             let (mut rx, mut tx) = (0u64, 0u64);
             for l in s.lines().skip(2) {
                 if let Some((name, vals)) = l.split_once(':') {
@@ -371,7 +394,7 @@ impl Sampler {
             }
             self.net = Some((rx, tx));
         }
-        if let Ok(s) = fs::read_to_string("/proc/stat") {
+        if let Ok(s) = fs::read_to_string(format!("{p_dir}/stat")) {
             let mut lines = s.lines();
             if let Some(first) = lines.next() {
                 let v: Vec<u64> = first
@@ -420,7 +443,7 @@ impl Sampler {
             }
             self.core_cpu = next_core_cpu;
         }
-        if let Ok(s) = fs::read_to_string("/proc/diskstats") {
+        if let Ok(s) = fs::read_to_string(format!("{p_dir}/diskstats")) {
             let mut total_read_sectors = 0u64;
             let mut total_write_sectors = 0u64;
             for l in s.lines() {
@@ -449,7 +472,7 @@ impl Sampler {
             }
             self.disk = Some((total_read_bytes, total_write_bytes));
         }
-        if let Ok(s) = fs::read_to_string("/proc/meminfo") {
+        if let Ok(s) = fs::read_to_string(format!("{p_dir}/meminfo")) {
             let get = |key: &str| {
                 s.lines()
                     .find_map(|l| {
@@ -490,6 +513,25 @@ pub fn end_process(pid: u32, start: u64, force: bool) -> io::Result<()> {
     if pid <= 1 || pid == std::process::id() {
         return Err(io::Error::other("This process is protected"));
     }
+
+    let is_flatpak_app = is_flatpak();
+
+    if is_flatpak_app {
+        let p = read_process(pid).ok_or_else(|| io::Error::other("Process already exited"))?;
+        if p.start != start {
+            return Err(io::Error::other("Process changed; select it again"));
+        }
+        let sig = if force { "-9" } else { "-15" };
+        let status = std::process::Command::new("flatpak-spawn")
+            .args(["--host", "kill", sig, &pid.to_string()])
+            .status()?;
+        if status.success() {
+            return Ok(());
+        } else {
+            return Err(io::Error::other("Failed to terminate host process"));
+        }
+    }
+
     let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) } as i32;
     if fd < 0 {
         return Err(io::Error::last_os_error());
