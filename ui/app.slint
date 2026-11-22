@@ -270,6 +270,8 @@ export component Monitor inherits Window {
     // Navigation and tab state
     in-out property <int> current-tab: 0; // 0 = Resources, 1 = Processes, 2 = File Systems
     in-out property <bool> search-open: false;
+    in-out property <bool> menu-open: false;
+    in-out property <bool> about-open: false;
 
     // Window controls callbacks
     callback minimize-window();
@@ -473,7 +475,7 @@ export component Monitor inherits Window {
                         width: 34px;
                         height: 34px;
                         border-radius: 6px;
-                        background: menu-touch.has-hover ? #2e2e2e : transparent;
+                        background: (menu-touch.has-hover || root.menu-open) ? #2e2e2e : transparent;
                         Text {
                             text: "☰";
                             font-size: 15px;
@@ -481,7 +483,12 @@ export component Monitor inherits Window {
                             horizontal-alignment: center;
                             vertical-alignment: center;
                         }
-                        menu-touch := TouchArea {}
+                        menu-touch := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => {
+                                root.menu-open = !root.menu-open;
+                            }
+                        }
                     }
 
                     // Window controls (Minimize, Maximize, Close)
@@ -1427,6 +1434,223 @@ export component Monitor inherits Window {
                                 fs-touch := TouchArea {}
                             }
                         }
+                    }
+                }
+            }
+        }
+    }
+
+    // Hamburger Dropdown Menu Overlay
+    if root.menu-open: Rectangle {
+        background: transparent;
+        TouchArea {
+            clicked => { root.menu-open = false; }
+        }
+        Rectangle {
+            x: parent.width - 240px;
+            y: 46px;
+            width: 220px;
+            background: #252525;
+            border-radius: 8px;
+            border-width: 1px;
+            border-color: #383838;
+            drop-shadow-blur: 16px;
+            drop-shadow-color: #00000088;
+            drop-shadow-offset-y: 6px;
+
+            VerticalLayout {
+                padding: 6px;
+                spacing: 2px;
+
+                // Option: Resources Tab
+                Rectangle {
+                    height: 32px;
+                    border-radius: 6px;
+                    background: res-item.has-hover ? #353535 : transparent;
+                    HorizontalLayout {
+                        padding-left: 12px;
+                        padding-right: 12px;
+                        spacing: 8px;
+                        cross-axis-alignment: center;
+                        Text { text: "⏱"; font-size: 13px; color: #a0a0a0; }
+                        Text { text: "Resources"; font-size: 13px; color: #ffffff; horizontal-stretch: 1; }
+                    }
+                    res-item := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => {
+                            root.current-tab = 0;
+                            root.menu-open = false;
+                        }
+                    }
+                }
+
+                // Option: Processes Tab
+                Rectangle {
+                    height: 32px;
+                    border-radius: 6px;
+                    background: proc-item.has-hover ? #353535 : transparent;
+                    HorizontalLayout {
+                        padding-left: 12px;
+                        padding-right: 12px;
+                        spacing: 8px;
+                        cross-axis-alignment: center;
+                        Text { text: "▶"; font-size: 12px; color: #a0a0a0; }
+                        Text { text: "Processes"; font-size: 13px; color: #ffffff; horizontal-stretch: 1; }
+                    }
+                    proc-item := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => {
+                            root.current-tab = 1;
+                            root.menu-open = false;
+                        }
+                    }
+                }
+
+                // Option: File Systems Tab
+                Rectangle {
+                    height: 32px;
+                    border-radius: 6px;
+                    background: fs-item.has-hover ? #353535 : transparent;
+                    HorizontalLayout {
+                        padding-left: 12px;
+                        padding-right: 12px;
+                        spacing: 8px;
+                        cross-axis-alignment: center;
+                        Text { text: "💾"; font-size: 13px; color: #a0a0a0; }
+                        Text { text: "File Systems"; font-size: 13px; color: #ffffff; horizontal-stretch: 1; }
+                    }
+                    fs-item := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => {
+                            root.current-tab = 2;
+                            root.menu-open = false;
+                        }
+                    }
+                }
+
+                // Separator
+                Rectangle {
+                    height: 1px;
+                    background: #383838;
+                }
+
+                // Option: About Dialog
+                Rectangle {
+                    height: 32px;
+                    border-radius: 6px;
+                    background: about-item.has-hover ? #353535 : transparent;
+                    HorizontalLayout {
+                        padding-left: 12px;
+                        padding-right: 12px;
+                        spacing: 8px;
+                        cross-axis-alignment: center;
+                        Text { text: "ℹ"; font-size: 14px; font-weight: 700; color: #3584e4; }
+                        Text { text: "About System Monitor"; font-size: 13px; color: #ffffff; horizontal-stretch: 1; }
+                    }
+                    about-item := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => {
+                            root.menu-open = false;
+                            root.about-open = true;
+                        }
+                    }
+                }
+
+                // Option: Quit
+                Rectangle {
+                    height: 32px;
+                    border-radius: 6px;
+                    background: quit-item.has-hover ? #5e1b21 : transparent;
+                    HorizontalLayout {
+                        padding-left: 12px;
+                        padding-right: 12px;
+                        spacing: 8px;
+                        cross-axis-alignment: center;
+                        Text { text: "✕"; font-size: 12px; color: #e01b24; }
+                        Text { text: "Quit"; font-size: 13px; color: #ffffff; horizontal-stretch: 1; }
+                    }
+                    quit-item := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => {
+                            root.menu-open = false;
+                            root.close-window();
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Modal About Dialog
+    if root.about-open: Rectangle {
+        background: #000000b0;
+        TouchArea {
+            clicked => { root.about-open = false; }
+        }
+        Rectangle {
+            width: 440px;
+            height: 320px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            background: #252525;
+            border-radius: 12px;
+            border-width: 1px;
+            border-color: #383838;
+            drop-shadow-blur: 24px;
+            drop-shadow-color: #00000099;
+
+            VerticalLayout {
+                padding: 24px;
+                spacing: 14px;
+                alignment: center;
+                cross-axis-alignment: center;
+
+                // App icon / symbol
+                Rectangle {
+                    width: 56px;
+                    height: 56px;
+                    border-radius: 14px;
+                    background: #1c71d8;
+                    Text {
+                        text: "📈";
+                        font-size: 30px;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+
+                Text {
+                    text: "System Monitor";
+                    font-size: 20px;
+                    font-weight: 700;
+                    color: #ffffff;
+                }
+
+                Text {
+                    text: "Version 0.1.0 • Built with Rust & Slint";
+                    font-size: 12px;
+                    color: #888888;
+                }
+
+                Text {
+                    text: "A modern, responsive Linux system performance monitor featuring live process tracking, network bandwidth attribution, and interactive resource graphs.";
+                    font-size: 12px;
+                    color: #cccccc;
+                    horizontal-alignment: center;
+                    wrap: word-wrap;
+                }
+
+                Text {
+                    text: "Licensed under MIT License • © 2026 Senidu Ravihara";
+                    font-size: 11px;
+                    color: #777777;
+                }
+
+                HorizontalLayout {
+                    spacing: 12px;
+                    Button {
+                        text: "Close";
+                        clicked => { root.about-open = false; }
                     }
                 }
             }
